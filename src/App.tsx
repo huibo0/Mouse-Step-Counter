@@ -20,12 +20,14 @@ import {
   RestartAlt,
   Timeline,
   TrendingUp,
+  Pets,
 } from '@mui/icons-material';
 
 function App() {
   const [steps, setSteps] = useState(0);
   const [lastSteps, setLastSteps] = useState(0);
   const [isIncreasing, setIsIncreasing] = useState(false);
+  const [dogSpeed, setDogSpeed] = useState(1);
 
   useEffect(() => {
     const unlisten = listen<number>('step_update', (event) => {
@@ -42,11 +44,18 @@ function App() {
     };
   }, [steps]);
 
+  useEffect(() => {
+    // 根据步数自动调整狗子的奔跑速度
+    const speed = Math.min(1 + (steps / 1000) * 2, 5); // 速度范围 1x - 5x
+    setDogSpeed(speed);
+  }, [steps]);
+
   const handleReset = async () => {
     try {
       await invoke('reset_counter');
       setSteps(0);
       setLastSteps(0);
+      setDogSpeed(1);
     } catch (error) {
       console.error('重置失败:', error);
     }
@@ -64,7 +73,8 @@ function App() {
         alignItems: 'center',
         justifyContent: 'center',
         padding: 2,
-        fontFamily: 'system-ui, -apple-system, sans-serif'
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        position: 'relative',
       }}
     >
       <Fade in timeout={1000}>
@@ -77,6 +87,8 @@ function App() {
             background: 'rgba(255, 255, 255, 0.95)',
             backdropFilter: 'blur(20px)',
             border: '1px solid rgba(255, 255, 255, 0.2)',
+            position: 'relative',
+            zIndex: 1,
           }}
         >
           <CardContent sx={{ padding: 4 }}>
@@ -101,23 +113,91 @@ function App() {
               </Box>
             </Stack>
 
+            {/* 小狗速度显示 */}
+            <Box textAlign="center" mb={2}>
+              <Chip
+                icon={<Pets />}
+                label={`狗子速度: ${dogSpeed.toFixed(1)}x`}
+                color="primary"
+                variant="outlined"
+                size="small"
+                sx={{
+                  borderRadius: 3,
+                  fontWeight: 'medium',
+                  background: 'rgba(103, 126, 234, 0.05)',
+                }}
+              />
+            </Box>
+
             {/* Main Counter */}
-            <Box textAlign="center" mb={4}>
+            <Box textAlign="center" mb={4} position="relative">
               <Grow in timeout={800}>
                 <Box>
-                  <Typography
-                    variant="h2"
-                    fontWeight="bold"
-                    sx={{
-                      background: 'linear-gradient(45deg, #667eea, #764ba2)',
-                      WebkitBackgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                      transform: isIncreasing ? 'scale(1.1)' : 'scale(1)',
-                      transition: 'transform 0.3s ease',
-                    }}
-                  >
-                    {steps.toLocaleString()}
-                  </Typography>
+                  <Stack direction="row" alignItems="center" justifyContent="center" spacing={2}>
+                    <Typography
+                      variant="h2"
+                      fontWeight="bold"
+                      sx={{
+                        background: 'linear-gradient(45deg, #667eea, #764ba2)',
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                        transform: isIncreasing ? 'scale(1.1)' : 'scale(1)',
+                        transition: 'transform 0.3s ease',
+                      }}
+                    >
+                      {steps.toLocaleString()}
+                    </Typography>
+                    
+                    {/* 奔跑的小狗 - 固定在数字旁边 */}
+                    <Box
+                      sx={{
+                        width: '60px',
+                        height: '45px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: steps > 0 ? 1 : 0.3,
+                        transition: 'opacity 0.5s ease',
+                        animation: `bounce ${1 / dogSpeed}s ease-in-out infinite`,
+                        '@keyframes bounce': {
+                          '0%, 100%': { transform: 'translateY(0px)' },
+                          '50%': { transform: 'translateY(-3px)' },
+                        },
+                      }}
+                    >
+                      <img
+                        src="/img/running_dog.gif"
+                        alt="Running Dog"
+                        style={{
+                          width: '60px',
+                          height: '45px',
+                          filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.1))',
+                        }}
+                        onLoad={() => console.log('Dog image loaded successfully')}
+                        onError={(e) => {
+                          console.error('Failed to load dog image:', e);
+                          e.currentTarget.style.display = 'none';
+                          const fallback = e.currentTarget.parentElement?.querySelector('.dog-fallback') as HTMLElement;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                      <Box
+                        className="dog-fallback"
+                        sx={{
+                          width: '60px',
+                          height: '45px',
+                          display: 'none',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '36px',
+                          filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.1))',
+                        }}
+                      >
+                        🐕
+                      </Box>
+                    </Box>
+                  </Stack>
+                  
                   <Typography variant="h6" color="text.secondary" gutterBottom>
                     步数
                   </Typography>
