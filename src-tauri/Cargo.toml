@@ -1,0 +1,23 @@
+[package]
+name = "mouse-step-counter"
+version = "0.0.0"
+description = "A Tauri App"
+authors = ["apollo"]
+license = ""
+repository = ""
+default-run = "mouse-step-counter"
+edition = "2021"
+rust-version = "1.60"
+
+[build-dependencies]
+tauri-build = { version = "1.5.1", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+tauri = { version = "1.6.1", features = [ "window-hide", "window-unminimize", "window-unmaximize", "window-minimize", "window-start-dragging", "window-show", "window-close", "window-maximize", "window-set-focus", "shell-open"] }
+enigo = "0.3.0"
+
+[features]
+default = [ "custom-protocol" ]
+custom-protocol = [ "tauri/custom-protocol" ] 
