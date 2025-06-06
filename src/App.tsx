@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/tauri';
-import { getCurrent } from '@tauri-apps/api/window';
 import {
   Box,
   Card,
@@ -21,14 +20,14 @@ import {
   RestartAlt,
   Timeline,
   TrendingUp,
-  Close,
+  BugReport,
+  Pets,
 } from '@mui/icons-material';
 
 function App() {
   const [steps, setSteps] = useState(0);
   const [lastSteps, setLastSteps] = useState(0);
   const [isIncreasing, setIsIncreasing] = useState(false);
-  const [dogSpeed, setDogSpeed] = useState(1);
 
   useEffect(() => {
     const unlisten = listen<number>('step_update', (event) => {
@@ -48,7 +47,6 @@ function App() {
   useEffect(() => {
     // 根据步数自动调整狗子的奔跑速度
     const speed = Math.min(1 + (steps / 1000) * 2, 5); // 速度范围 1x - 5x
-    setDogSpeed(speed);
     // 在控制台打印狗子速度
     console.log(`🐕 狗子速度更新: ${speed.toFixed(1)}x (步数: ${steps})`);
   }, [steps]);
@@ -58,29 +56,34 @@ function App() {
       await invoke('reset_counter');
       setSteps(0);
       setLastSteps(0);
-      setDogSpeed(1);
     } catch (error) {
       console.error('重置失败:', error);
     }
   };
 
-  const handleClose = async () => {
+  const handleOpenDevTools = async () => {
     try {
-      console.log('🔄 切换到宠物窗口...');
-      await invoke('switch_to_pet_window');
-      console.log('✅ 成功切换到宠物窗口！');
+      console.log('🐛 点击了调试按钮，正在打开开发者工具...');
+      await invoke('open_devtools');
+      console.log('✅ 开发者工具命令已发送');
+      // 给用户一个视觉反馈
+      alert('开发者工具已打开（可能是独立窗口）');
     } catch (error) {
-      console.error('❌ 切换失败:', error);
-      // 备用方案：直接隐藏当前窗口
-      try {
-        const appWindow = getCurrent();
-        await appWindow.hide();
-      } catch (hideError) {
-        console.error('隐藏窗口失败:', hideError);
-      }
+      console.error('打开开发者工具失败:', error);
+      alert(`打开开发者工具失败: ${error}`);
     }
   };
 
+  const handleShowPetWindow = async () => {
+    try {
+      console.log('🐕 点击了显示宠物狗按钮，正在切换到宠物窗口...');
+      await invoke('switch_to_pet_window');
+      console.log('✅ 宠物窗口命令已发送');
+    } catch (error) {
+      console.error('显示宠物窗口失败:', error);
+      alert(`显示宠物窗口失败: ${error}`);
+    }
+  };
 
 
   const progress = Math.min((steps % 1000) / 10, 100);
@@ -262,6 +265,44 @@ function App() {
                 title="重置计数器"
               >
                 <RestartAlt />
+              </IconButton>
+              
+              <IconButton
+                onClick={(e) => {
+                  console.log('🖱️ 宠物狗按钮被点击了！');
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleShowPetWindow();
+                }}
+                size="large"
+                sx={{
+                  background: 'rgba(76, 175, 80, 0.1)',
+                  '&:hover': {
+                    background: 'rgba(76, 175, 80, 0.2)',
+                  },
+                }}
+                title="显示宠物狗"
+              >
+                <Pets />
+              </IconButton>
+              
+              <IconButton
+                onClick={(e) => {
+                  console.log('🖱️ 调试按钮被点击了！');
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleOpenDevTools();
+                }}
+                size="large"
+                sx={{
+                  background: 'rgba(255, 152, 0, 0.1)',
+                  '&:hover': {
+                    background: 'rgba(255, 152, 0, 0.2)',
+                  },
+                }}
+                title="打开开发者工具"
+              >
+                <BugReport />
               </IconButton>
             </Stack>
           </CardContent>

@@ -38,13 +38,17 @@ jobs:
       with:
         workspaces: './src-tauri -> target'
 
-    - name: Build the app
-      run: npm run tauri:build
+    - name: Build Intel app
+      run: npm run tauri build -- --target x86_64-apple-darwin
       env:
         # 跳过 macOS 代码签名（用于测试构建）
         APPLE_SIGNING_IDENTITY: "-"
-        # 构建 Universal Binary（支持 Intel 和 Apple Silicon）
-        TAURI_BUNDLE_MACOS_TARGETS: "universal-apple-darwin" 
+    
+    - name: Build Apple Silicon app
+      run: npm run tauri build -- --target aarch64-apple-darwin
+      env:
+        # 跳过 macOS 代码签名（用于测试构建）
+        APPLE_SIGNING_IDENTITY: "-" 
 
     - name: Get app version
       run: |
@@ -54,8 +58,11 @@ jobs:
     - name: List build outputs (debug)
       run: |
         echo "=== Checking build outputs ==="
-        find src-tauri/target/release/bundle -type f -name "*.dmg" -o -name "*.app" | head -10
-        ls -la src-tauri/target/release/bundle/ || true
+        find src-tauri/target -type f -name "*.dmg" -o -name "*.app" | head -20
+        echo "=== Intel build ==="
+        ls -la src-tauri/target/x86_64-apple-darwin/release/bundle/ || true
+        echo "=== Apple Silicon build ==="
+        ls -la src-tauri/target/aarch64-apple-darwin/release/bundle/ || true
 
     - name: Create Release (if tag)
       if: startsWith(github.ref, 'refs/tags/')
@@ -63,34 +70,61 @@ jobs:
       with:
         name: "鼠标步数计数器 macOS v${{ env.APP_VERSION }}"
         files: |
-          src-tauri/target/release/bundle/dmg/*.dmg
+          src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+          src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
         generate_release_notes: true
         prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Upload macOS DMG (if not tag)
+    - name: Upload Intel DMG (if not tag)
       if: ${{ !startsWith(github.ref, 'refs/tags/') }}
       uses: actions/upload-artifact@v4
       with:
-        name: macos-dmg-${{ env.APP_VERSION }}
-        path: src-tauri/target/release/bundle/dmg/*.dmg
+        name: macos-intel-dmg-${{ env.APP_VERSION }}
+        path: src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+        if-no-files-found: warn
+        retention-days: 30
+    
+    - name: Upload Apple Silicon DMG (if not tag)
+      if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-arm64-dmg-${{ env.APP_VERSION }}
+        path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
         if-no-files-found: warn
         retention-days: 30
 
-    - name: Create APP archive
+    - name: Create Intel APP archive
       if: ${{ !startsWith(github.ref, 'refs/tags/') }}
       run: |
-        cd src-tauri/target/release/bundle/macos
-        if [ -d "Mouse Step Counter.app" ]; then
-          tar -czf "Mouse-Step-Counter-${{ env.APP_VERSION }}.app.tar.gz" "Mouse Step Counter.app"
+        if [ -d "src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Mouse Step Counter.app" ]; then
+          cd src-tauri/target/x86_64-apple-darwin/release/bundle/macos
+          tar -czf "Mouse-Step-Counter-intel-${{ env.APP_VERSION }}.app.tar.gz" "Mouse Step Counter.app"
+        fi
+        
+    - name: Create Apple Silicon APP archive
+      if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      run: |
+        if [ -d "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Mouse Step Counter.app" ]; then
+          cd src-tauri/target/aarch64-apple-darwin/release/bundle/macos
+          tar -czf "Mouse-Step-Counter-arm64-${{ env.APP_VERSION }}.app.tar.gz" "Mouse Step Counter.app"
         fi
 
-    - name: Upload macOS APP (if not tag)
+    - name: Upload Intel APP (if not tag)
       if: ${{ !startsWith(github.ref, 'refs/tags/') }}
       uses: actions/upload-artifact@v4
       with:
-        name: macos-app-${{ env.APP_VERSION }}
-        path: src-tauri/target/release/bundle/macos/*.app.tar.gz
+        name: macos-intel-app-${{ env.APP_VERSION }}
+        path: src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz
+        if-no-files-found: warn
+        retention-days: 30
+        
+    - name: Upload Apple Silicon APP (if not tag)
+      if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-arm64-app-${{ env.APP_VERSION }}
+        path: src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
         if-no-files-found: warn
         retention-days: 30 

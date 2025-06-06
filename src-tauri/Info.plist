@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 确保应用能访问本地资源 -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+    
+    <!-- 窗口管理权限 -->
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+    
+    <!-- 确保应用能正确管理多个窗口 -->
+    <key>NSWindowRestorationExcludedFromCycling</key>
+    <false/>
+    
+    <!-- 支持高 DPI 显示 -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    
+    <!-- 启用透明窗口支持 -->
+    <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
+    
+    <!-- 确保应用在生产环境中能正确访问资源 -->
+    <key>NSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    
+    <key>NSAppleEventsUsageDescription</key>
+    <string>This app needs to access Apple Events to provide mouse tracking functionality.</string>
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>This app needs to monitor input events to track mouse movement for step counting.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>This app needs accessibility permissions to monitor mouse movement for step counting.</string>
+    <key>NSSystemAdministrationUsageDescription</key>
+    <string>This app needs system administration privileges to monitor mouse events.</string>
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryInputMonitoring</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>CA92.1</string>
+            </array>
+        </dict>
+    </array>
+    <key>LSUIElement</key>
+    <false/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>CFBundleExecutable</key>
+    <string>Mouse Step Counter</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.mouse-step-counter</string>
+    <key>CFBundleName</key>
+    <string>Mouse Step Counter</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.3</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.3</string>
+</dict>
+</plist> 
