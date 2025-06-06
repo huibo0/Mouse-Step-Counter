@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/tauri';
+import { getCurrent } from '@tauri-apps/api/window';
 import {
   Box,
   Card,
@@ -20,7 +21,7 @@ import {
   RestartAlt,
   Timeline,
   TrendingUp,
-  Pets,
+  Close,
 } from '@mui/icons-material';
 
 function App() {
@@ -48,6 +49,8 @@ function App() {
     // 根据步数自动调整狗子的奔跑速度
     const speed = Math.min(1 + (steps / 1000) * 2, 5); // 速度范围 1x - 5x
     setDogSpeed(speed);
+    // 在控制台打印狗子速度
+    console.log(`🐕 狗子速度更新: ${speed.toFixed(1)}x (步数: ${steps})`);
   }, [steps]);
 
   const handleReset = async () => {
@@ -60,6 +63,25 @@ function App() {
       console.error('重置失败:', error);
     }
   };
+
+  const handleClose = async () => {
+    try {
+      console.log('🔄 切换到宠物窗口...');
+      await invoke('switch_to_pet_window');
+      console.log('✅ 成功切换到宠物窗口！');
+    } catch (error) {
+      console.error('❌ 切换失败:', error);
+      // 备用方案：直接隐藏当前窗口
+      try {
+        const appWindow = getCurrent();
+        await appWindow.hide();
+      } catch (hideError) {
+        console.error('隐藏窗口失败:', hideError);
+      }
+    }
+  };
+
+
 
   const progress = Math.min((steps % 1000) / 10, 100);
   const distance = (steps * 0.1).toFixed(1); // 假设每步0.1米
@@ -103,7 +125,7 @@ function App() {
               >
                 <Mouse sx={{ fontSize: 28 }} />
               </Avatar>
-              <Box>
+              <Box sx={{ flex: 1 }}>
                 <Typography variant="h5" fontWeight="bold" color="text.primary">
                   鼠标计步器
                 </Typography>
@@ -111,93 +133,26 @@ function App() {
                   Mouse Step Counter
                 </Typography>
               </Box>
+
             </Stack>
 
-            {/* 小狗速度显示 */}
-            <Box textAlign="center" mb={2}>
-              <Chip
-                icon={<Pets />}
-                label={`狗子速度: ${dogSpeed.toFixed(1)}x`}
-                color="primary"
-                variant="outlined"
-                size="small"
-                sx={{
-                  borderRadius: 3,
-                  fontWeight: 'medium',
-                  background: 'rgba(103, 126, 234, 0.05)',
-                }}
-              />
-            </Box>
-
             {/* Main Counter */}
-            <Box textAlign="center" mb={4} position="relative">
+            <Box textAlign="center" mb={4}>
               <Grow in timeout={800}>
                 <Box>
-                  <Stack direction="row" alignItems="center" justifyContent="center" spacing={2}>
-                    <Typography
-                      variant="h2"
-                      fontWeight="bold"
-                      sx={{
-                        background: 'linear-gradient(45deg, #667eea, #764ba2)',
-                        WebkitBackgroundClip: 'text',
-                        WebkitTextFillColor: 'transparent',
-                        transform: isIncreasing ? 'scale(1.1)' : 'scale(1)',
-                        transition: 'transform 0.3s ease',
-                      }}
-                    >
-                      {steps.toLocaleString()}
-                    </Typography>
-                    
-                    {/* 奔跑的小狗 - 固定在数字旁边 */}
-                    <Box
-                      sx={{
-                        width: '60px',
-                        height: '45px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        opacity: steps > 0 ? 1 : 0.3,
-                        transition: 'opacity 0.5s ease',
-                        animation: `bounce ${1 / dogSpeed}s ease-in-out infinite`,
-                        '@keyframes bounce': {
-                          '0%, 100%': { transform: 'translateY(0px)' },
-                          '50%': { transform: 'translateY(-3px)' },
-                        },
-                      }}
-                    >
-                      <img
-                        src="/img/running_dog.gif"
-                        alt="Running Dog"
-                        style={{
-                          width: '60px',
-                          height: '45px',
-                          filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.1))',
-                        }}
-                        onLoad={() => console.log('Dog image loaded successfully')}
-                        onError={(e) => {
-                          console.error('Failed to load dog image:', e);
-                          e.currentTarget.style.display = 'none';
-                          const fallback = e.currentTarget.parentElement?.querySelector('.dog-fallback') as HTMLElement;
-                          if (fallback) fallback.style.display = 'flex';
-                        }}
-                      />
-                      <Box
-                        className="dog-fallback"
-                        sx={{
-                          width: '60px',
-                          height: '45px',
-                          display: 'none',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '36px',
-                          filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.1))',
-                        }}
-                      >
-                        🐕
-                      </Box>
-                    </Box>
-                  </Stack>
-                  
+                  <Typography
+                    variant="h2"
+                    fontWeight="bold"
+                    sx={{
+                      background: 'linear-gradient(45deg, #667eea, #764ba2)',
+                      WebkitBackgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent',
+                      transform: isIncreasing ? 'scale(1.1)' : 'scale(1)',
+                      transition: 'transform 0.3s ease',
+                    }}
+                  >
+                    {steps.toLocaleString()}
+                  </Typography>
                   <Typography variant="h6" color="text.secondary" gutterBottom>
                     步数
                   </Typography>
@@ -293,8 +248,8 @@ function App() {
               />
             </Box>
 
-            {/* Reset Button */}
-            <Box display="flex" justifyContent="center">
+            {/* Action Buttons */}
+            <Stack direction="row" justifyContent="center" spacing={2}>
               <IconButton
                 onClick={handleReset}
                 size="large"
@@ -304,10 +259,11 @@ function App() {
                     background: 'rgba(103, 126, 234, 0.2)',
                   },
                 }}
+                title="重置计数器"
               >
                 <RestartAlt />
               </IconButton>
-            </Box>
+            </Stack>
           </CardContent>
         </Card>
       </Fade>

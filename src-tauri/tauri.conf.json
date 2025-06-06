@@ -4,7 +4,7 @@
     "beforeBuildCommand": "npm run build",
     "devPath": "http://localhost:1420",
     "distDir": "../dist",
-    "withGlobalTauri": false
+    "withGlobalTauri": true
   },
   "package": {
     "productName": "Mouse Step Counter",
@@ -18,16 +18,7 @@
         "open": true
       },
       "window": {
-        "all": false,
-        "close": true,
-        "hide": true,
-        "show": true,
-        "maximize": true,
-        "minimize": true,
-        "unmaximize": true,
-        "unminimize": true,
-        "startDragging": true,
-        "setFocus": true
+        "all": true
       }
     },
     "bundle": {
@@ -48,6 +39,7 @@
     "security": {
       "csp": null
     },
+    "macOSPrivateApi": true,
     "windows": [
       {
         "fullscreen": false,
@@ -58,11 +50,33 @@
         "minWidth": 400,
         "minHeight": 600,
         "label": "main",
-        "visible": true,
-        "focus": true,
+        "visible": false,
+        "focus": false,
         "alwaysOnTop": false,
         "skipTaskbar": false,
         "decorations": true
+      },
+      {
+        "fullscreen": false,
+        "resizable": false,
+        "title": "Pet Dog",
+        "width": 300,
+        "height": 300,
+        "minWidth": 300,
+        "minHeight": 300,
+        "maxWidth": 300,
+        "maxHeight": 300,
+        "label": "pet",
+        "url": "pet.html",
+        "visible": true,
+        "focus": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "decorations": false,
+        "transparent": true,
+        "center": false,
+        "x": 1200,
+        "y": 700
       }
     ]
   }

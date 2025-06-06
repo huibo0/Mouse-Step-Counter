@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pet Window Debug Logs</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1a1a1a;
+            color: #00ff00;
+            padding: 20px;
+            line-height: 1.4;
+        }
+        
+        .header {
+            background: #333;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        .log-container {
+            background: #222;
+            border: 1px solid #555;
+            border-radius: 5px;
+            padding: 15px;
+            height: 70vh;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        
+        .log-entry {
+            margin-bottom: 2px;
+            word-wrap: break-word;
+        }
+        
+        .log-entry.error {
+            color: #ff4444;
+        }
+        
+        .log-entry.success {
+            color: #44ff44;
+        }
+        
+        .log-entry.warning {
+            color: #ffaa44;
+        }
+        
+        .log-entry.info {
+            color: #44aaff;
+        }
+        
+        .status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: #333;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        
+        .filter-input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #555;
+            border-radius: 3px;
+            background: #333;
+            color: #fff;
+            font-family: inherit;
+        }
+    </style>
+</head>
+<body>
+    <div class="status" id="status">Ready</div>
+    
+    <div class="header">
+        <h1>🐕 Pet Window Debug Logs</h1>
+        <p>实时监控宠物窗口的调试日志</p>
+    </div>
+    
+    <div class="controls">
+        <button onclick="loadLogs()">🔄 刷新日志</button>
+        <button onclick="clearLogs()">🗑️ 清空显示</button>
+        <button onclick="autoRefresh()">⚡ 自动刷新</button>
+        <button onclick="exportLogs()">💾 导出日志</button>
+        <input type="text" class="filter-input" id="filterInput" placeholder="过滤日志内容..." onkeyup="filterLogs()">
+    </div>
+    
+    <div class="log-container" id="logContainer">
+        <div class="log-entry info">正在加载日志...</div>
+    </div>
+    
+    <script>
+        let autoRefreshInterval = null;
+        let allLogs = [];
+        
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
+        
+        function loadLogs() {
+            updateStatus('加载中...');
+            try {
+                const logs = localStorage.getItem('petWindowLogs');
+                if (logs) {
+                    allLogs = logs.split('\n').filter(line => line.trim());
+                    displayLogs(allLogs);
+                    updateStatus(`已加载 ${allLogs.length} 条日志`);
+                } else {
+                    displayLogs(['没有找到日志数据。请确保宠物窗口已经运行过。']);
+                    updateStatus('无日志数据');
+                }
+            } catch (error) {
+                displayLogs(['加载日志时出错: ' + error.message]);
+                updateStatus('加载失败');
+            }
+        }
+        
+        function displayLogs(logs) {
+            const container = document.getElementById('logContainer');
+            container.innerHTML = '';
+            
+            logs.forEach(log => {
+                const div = document.createElement('div');
+                div.className = 'log-entry';
+                
+                // 根据日志内容添加样式
+                if (log.includes('❌') || log.includes('ERROR') || log.includes('失败')) {
+                    div.className += ' error';
+                } else if (log.includes('✅') || log.includes('成功')) {
+                    div.className += ' success';
+                } else if (log.includes('⚠️') || log.includes('WARNING')) {
+                    div.className += ' warning';
+                } else if (log.includes('🔧') || log.includes('🧪') || log.includes('📞')) {
+                    div.className += ' info';
+                }
+                
+                div.textContent = log;
+                container.appendChild(div);
+            });
+            
+            // 滚动到底部
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        function clearLogs() {
+            allLogs = [];
+            displayLogs(['日志显示已清空']);
+            updateStatus('已清空');
+        }
+        
+        function autoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+                updateStatus('自动刷新已停止');
+                document.querySelector('button[onclick="autoRefresh()"]').textContent = '⚡ 自动刷新';
+            } else {
+                autoRefreshInterval = setInterval(loadLogs, 2000);
+                updateStatus('自动刷新已启动');
+                document.querySelector('button[onclick="autoRefresh()"]').textContent = '⏹️ 停止刷新';
+                loadLogs();
+            }
+        }
+        
+        function exportLogs() {
+            if (allLogs.length === 0) {
+                alert('没有日志可导出');
+                return;
+            }
+            
+            const logsText = allLogs.join('\n');
+            const blob = new Blob([logsText], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `pet-debug-logs-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+            updateStatus('日志已导出');
+        }
+        
+        function filterLogs() {
+            const filter = document.getElementById('filterInput').value.toLowerCase();
+            if (filter.trim() === '') {
+                displayLogs(allLogs);
+            } else {
+                const filtered = allLogs.filter(log => 
+                    log.toLowerCase().includes(filter)
+                );
+                displayLogs(filtered);
+                updateStatus(`过滤结果: ${filtered.length}/${allLogs.length}`);
+            }
+        }
+        
+        // 初始加载
+        loadLogs();
+        
+        // 页面可见性变化时刷新
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                loadLogs();
+            }
+        });
+        
+        // 键盘快捷键
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'F5' || (e.metaKey && e.key === 'r')) {
+                e.preventDefault();
+                loadLogs();
+            } else if (e.key === 'Escape') {
+                document.getElementById('filterInput').value = '';
+                filterLogs();
+            }
+        });
+    </script>
+</body>
+</html> 
