@@ -19,6 +19,26 @@
       },
       "window": {
         "all": true
+      },
+      "fs": {
+        "all": false,
+        "readFile": true,
+        "writeFile": true,
+        "readDir": false,
+        "copyFile": false,
+        "createDir": false,
+        "removeDir": false,
+        "removeFile": false,
+        "renameFile": false,
+        "exists": false
+      },
+      "dialog": {
+        "all": true,
+        "ask": false,
+        "confirm": false,
+        "message": false,
+        "open": false,
+        "save": false
       }
     },
     "bundle": {

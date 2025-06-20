@@ -15,9 +15,10 @@ tauri-build = { version = "1.5.1", features = [] }
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-tauri = { version = "1.6.1", features = [ "window-all", "macos-private-api", "shell-open", "devtools"] }
+tauri = { version = "1.6.1", features = [ "fs-write-file", "dialog-all", "fs-read-file", "window-all", "macos-private-api", "shell-open", "devtools"] }
 enigo = "0.3.0"
 fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }
+chrono = { version = "0.4.38", features = ["serde", "now"] }
 
 [features]
 default = [ "custom-protocol" ]

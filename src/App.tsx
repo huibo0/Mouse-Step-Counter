@@ -1,33 +1,35 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/tauri';
 import {
   Box,
   Card,
   CardContent,
-  Typography,
-  LinearProgress,
-  Chip,
-  IconButton,
-  Stack,
-  Avatar,
   Fade,
-  Grow,
 } from '@mui/material';
-import {
-  Mouse,
-  DirectionsWalk,
-  RestartAlt,
-  Timeline,
-  TrendingUp,
-  BugReport,
-  Pets,
-} from '@mui/icons-material';
+
+import { HeaderBar } from './components/HeaderBar';
+import { StepCounterDisplay } from './components/StepCounterDisplay';
+import { StatsCards } from './components/StatsCards';
+import { WaterReminderCard } from './components/WaterReminderCard';
+import { StatusChip } from './components/StatusChip';
+import { ActionButtons } from './components/ActionButtons';
+import { WaterReminderConfigDialog } from './components/WaterReminderConfigDialog';
+import { WaterReminderConfig, WaterReminderState } from './types/water';
 
 function App() {
   const [steps, setSteps] = useState(0);
   const [lastSteps, setLastSteps] = useState(0);
   const [isIncreasing, setIsIncreasing] = useState(false);
+  const [waterConfig, setWaterConfig] = useState<WaterReminderConfig>({
+    daily_glasses: 8,
+    reminder_interval_hours: 1,
+    custom_reminder_times: [],
+    enabled: false,
+  });
+  const [waterState, setWaterState] = useState<WaterReminderState | null>(null);
+  const [configDialogOpen, setConfigDialogOpen] = useState(false);
+  const [tempConfig, setTempConfig] = useState<WaterReminderConfig>(waterConfig);
 
   useEffect(() => {
     const unlisten = listen<number>('step_update', (event) => {
@@ -51,6 +53,47 @@ function App() {
     console.log(`🐕 狗子速度更新: ${speed.toFixed(1)}x (步数: ${steps})`);
   }, [steps]);
 
+  // 加载喝水提醒配置和状态
+  useEffect(() => {
+    const loadWaterData = async () => {
+      try {
+        const config = await invoke<WaterReminderConfig>('get_water_reminder_config');
+        const state = await invoke<WaterReminderState>('get_water_reminder_state');
+        setWaterConfig(config);
+        setWaterState(state);
+        setTempConfig(config);
+      } catch (error) {
+        console.error('加载喝水提醒数据失败:', error);
+      }
+    };
+    loadWaterData();
+  }, []);
+
+  // 刷新喝水状态
+  const refreshWaterState = useCallback(async () => {
+    try {
+      console.log('🔄 [APP] Refreshing water state...');
+      const state = await invoke<WaterReminderState>('get_water_reminder_state');
+      setWaterState(state);
+      console.log('✅ [APP] Water state refreshed:', state);
+    } catch (error) {
+      console.error('❌ [APP] Failed to refresh water state:', error);
+    }
+  }, []);
+
+  // 监听后端发来的喝水提醒事件
+  useEffect(() => {
+    const unlisten = listen<string>('water_reminder', (event) => {
+      console.log('✅✅✅ [APP] Received water_reminder event!', event.payload);
+      refreshWaterState();
+    });
+
+    return () => {
+      console.log('[APP] Unregistering water_reminder listener.');
+      unlisten.then((f) => f());
+    };
+  }, [refreshWaterState]);
+
   const handleReset = async () => {
     try {
       await invoke('reset_counter');
@@ -67,10 +110,10 @@ function App() {
       await invoke('open_devtools');
       console.log('✅ 开发者工具命令已发送');
       // 给用户一个视觉反馈
-      alert('开发者工具已打开（可能是独立窗口）');
+      // alert('开发者工具已打开（可能是独立窗口）');
     } catch (error) {
       console.error('打开开发者工具失败:', error);
-      alert(`打开开发者工具失败: ${error}`);
+      // alert(`打开开发者工具失败: ${error}`);
     }
   };
 
@@ -85,8 +128,28 @@ function App() {
     }
   };
 
+  const handleOpenWaterConfig = () => {
+    setTempConfig(waterConfig);
+    setConfigDialogOpen(true);
+  };
 
-  const progress = Math.min((steps % 1000) / 10, 100);
+  const handleSaveWaterConfig = async () => {
+    try {
+      await invoke('update_water_reminder_config', { config: tempConfig });
+      setWaterConfig(tempConfig);
+      setConfigDialogOpen(false);
+      console.log('💧 喝水提醒配置已保存');
+    } catch (error) {
+      console.error('保存喝水提醒配置失败:', error);
+      alert(`保存配置失败: ${error}`);
+    }
+  };
+
+  const handleCancelWaterConfig = () => {
+    setTempConfig(waterConfig);
+    setConfigDialogOpen(false);
+  };
+
   const distance = (steps * 0.1).toFixed(1); // 假设每步0.1米
 
   return (
@@ -117,197 +180,44 @@ function App() {
           }}
         >
           <CardContent sx={{ padding: 4 }}>
-            {/* Header */}
-            <Stack direction="row" alignItems="center" spacing={2} mb={3}>
-              <Avatar
-                sx={{
-                  background: 'linear-gradient(45deg, #667eea, #764ba2)',
-                  width: 56,
-                  height: 56,
-                }}
-              >
-                <Mouse sx={{ fontSize: 28 }} />
-              </Avatar>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="h5" fontWeight="bold" color="text.primary">
-                  鼠标计步器
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Mouse Step Counter
-                </Typography>
-              </Box>
+            <HeaderBar />
+            
+            <StepCounterDisplay 
+              steps={steps} 
+              isIncreasing={isIncreasing} 
+            />
 
-            </Stack>
+            <StatsCards 
+              distance={distance}
+              steps={steps}
+              lastSteps={lastSteps}
+            />
 
-            {/* Main Counter */}
-            <Box textAlign="center" mb={4}>
-              <Grow in timeout={800}>
-                <Box>
-                  <Typography
-                    variant="h2"
-                    fontWeight="bold"
-                    sx={{
-                      background: 'linear-gradient(45deg, #667eea, #764ba2)',
-                      WebkitBackgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                      transform: isIncreasing ? 'scale(1.1)' : 'scale(1)',
-                      transition: 'transform 0.3s ease',
-                    }}
-                  >
-                    {steps.toLocaleString()}
-                  </Typography>
-                  <Typography variant="h6" color="text.secondary" gutterBottom>
-                    步数
-                  </Typography>
-                </Box>
-              </Grow>
-            </Box>
+            <WaterReminderCard 
+              waterState={waterState}
+              waterConfig={waterConfig}
+              onWaterDrunk={refreshWaterState}
+            />
 
-            {/* Progress Bar */}
-            <Box mb={3}>
-              <Stack direction="row" justifyContent="space-between" mb={1}>
-                <Typography variant="body2" color="text.secondary">
-                  进度到下个千步
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {progress.toFixed(0)}%
-                </Typography>
-              </Stack>
-              <LinearProgress
-                variant="determinate"
-                value={progress}
-                sx={{
-                  height: 8,
-                  borderRadius: 4,
-                  backgroundColor: 'rgba(103, 126, 234, 0.1)',
-                  '& .MuiLinearProgress-bar': {
-                    background: 'linear-gradient(90deg, #667eea, #764ba2)',
-                    borderRadius: 4,
-                  },
-                }}
-              />
-            </Box>
+            <StatusChip steps={steps} />
 
-            {/* Stats Cards */}
-            <Stack direction="row" spacing={2} mb={3}>
-              <Card
-                variant="outlined"
-                sx={{
-                  flex: 1,
-                  background: 'rgba(103, 126, 234, 0.05)',
-                  borderColor: 'rgba(103, 126, 234, 0.2)',
-                }}
-              >
-                <CardContent sx={{ padding: 2, '&:last-child': { pb: 2 } }}>
-                  <Stack direction="row" alignItems="center" spacing={1}>
-                    <DirectionsWalk color="primary" />
-                    <Box>
-                      <Typography variant="h6" fontWeight="bold">
-                        {distance}m
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        距离
-                      </Typography>
-                    </Box>
-                  </Stack>
-                </CardContent>
-              </Card>
-
-              <Card
-                variant="outlined"
-                sx={{
-                  flex: 1,
-                  background: 'rgba(118, 75, 162, 0.05)',
-                  borderColor: 'rgba(118, 75, 162, 0.2)',
-                }}
-              >
-                <CardContent sx={{ padding: 2, '&:last-child': { pb: 2 } }}>
-                  <Stack direction="row" alignItems="center" spacing={1}>
-                    <TrendingUp color="secondary" />
-                    <Box>
-                      <Typography variant="h6" fontWeight="bold">
-                        {steps > lastSteps ? '+' : ''}{steps - lastSteps}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        增量
-                      </Typography>
-                    </Box>
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Stack>
-
-            {/* Status Chip */}
-            <Box display="flex" justifyContent="center" mb={2}>
-              <Chip
-                icon={<Timeline />}
-                label={steps > 0 ? "监听中 🖱️" : "等待鼠标移动..."}
-                color={steps > 0 ? "success" : "default"}
-                variant="outlined"
-                sx={{
-                  borderRadius: 3,
-                  fontWeight: 'medium',
-                }}
-              />
-            </Box>
-
-            {/* Action Buttons */}
-            <Stack direction="row" justifyContent="center" spacing={2}>
-              <IconButton
-                onClick={handleReset}
-                size="large"
-                sx={{
-                  background: 'rgba(103, 126, 234, 0.1)',
-                  '&:hover': {
-                    background: 'rgba(103, 126, 234, 0.2)',
-                  },
-                }}
-                title="重置计数器"
-              >
-                <RestartAlt />
-              </IconButton>
-              
-              <IconButton
-                onClick={(e) => {
-                  console.log('🖱️ 宠物狗按钮被点击了！');
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleShowPetWindow();
-                }}
-                size="large"
-                sx={{
-                  background: 'rgba(76, 175, 80, 0.1)',
-                  '&:hover': {
-                    background: 'rgba(76, 175, 80, 0.2)',
-                  },
-                }}
-                title="显示宠物狗"
-              >
-                <Pets />
-              </IconButton>
-              
-              <IconButton
-                onClick={(e) => {
-                  console.log('🖱️ 调试按钮被点击了！');
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleOpenDevTools();
-                }}
-                size="large"
-                sx={{
-                  background: 'rgba(255, 152, 0, 0.1)',
-                  '&:hover': {
-                    background: 'rgba(255, 152, 0, 0.2)',
-                  },
-                }}
-                title="打开开发者工具"
-              >
-                <BugReport />
-              </IconButton>
-            </Stack>
+            <ActionButtons
+              onReset={handleReset}
+              onShowPet={handleShowPetWindow}
+              onOpenWaterConfig={handleOpenWaterConfig}
+              onOpenDevTools={handleOpenDevTools}
+            />
           </CardContent>
         </Card>
       </Fade>
+
+      <WaterReminderConfigDialog
+        open={configDialogOpen}
+        config={tempConfig}
+        onClose={handleCancelWaterConfig}
+        onSave={handleSaveWaterConfig}
+        onConfigChange={setTempConfig}
+      />
     </Box>
   );
 }

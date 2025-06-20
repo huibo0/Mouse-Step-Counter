@@ -380,21 +380,27 @@
                 }
             });
 
-            // 说话功能
-            const speeches = [
-                "汪！", // 短句
-                "今天天气真不错呢！", // 中等长度
-                "主人，我已经帮你记录了很多步数了，要不要休息一下？" // 长句
+            // 说话功能 - 专门用于喝水提醒
+            const waterReminderMessages = [
+                "主人，该喝水啦！💧",
+                "汪汪！喝水时间到了！🥤",
+                "主人，记得补充水分哦！💦",
+                "该喝水了，保持健康！🌊",
+                "喝水提醒：该休息一下了！🚰",
+                "主人，喝杯水提提神吧！💧",
+                "健康提醒：该喝水了！💦",
+                "喝水时间到！保持活力！🥤"
             ];
 
             let speechTimeout;
             let canSpeak = true;
+            let isWaterReminderMode = false;
 
-            function showSpeech() {
+            function showWaterReminder() {
                 if (!canSpeak) return;
                 
-                const randomSpeech = speeches[Math.floor(Math.random() * speeches.length)];
-                speechBubble.textContent = randomSpeech;
+                const randomMessage = waterReminderMessages[Math.floor(Math.random() * waterReminderMessages.length)];
+                speechBubble.textContent = randomMessage;
                 
                 // 定位气泡在狗子嘴巴边上
                 const bubbleWidth = 180; // max-width in CSS
@@ -414,38 +420,69 @@
                 speechBubble.style.animation = 'speechAppear 0.3s ease-out';
                 
                 canSpeak = false;
+                isWaterReminderMode = true;
                 
-                console.log('💬 狗子说话:', randomSpeech);
+                console.log('💧 狗子喝水提醒:', randomMessage);
                 
-                // 3秒后消失
+                // 5秒后消失
                 speechTimeout = setTimeout(() => {
                     speechBubble.style.animation = 'speechDisappear 0.3s ease-out';
                     setTimeout(() => {
                         speechBubble.style.display = 'none';
                         canSpeak = true;
+                        isWaterReminderMode = false;
                     }, 300);
-                }, 3000);
+                }, 5000);
             }
 
-            // 随机说话 (每5-15秒说一次)
-            function scheduleSpeech() {
-                const randomDelay = 5000 + Math.random() * 10000; // 5-15秒
-                setTimeout(() => {
-                    if (canSpeak) {
-                        showSpeech();
+            // 监听喝水提醒事件
+            window.__TAURI__.event.listen('water_reminder', (event) => {
+                console.log('💧 收到喝水提醒事件:', event.payload);
+                showWaterReminder();
+            });
+
+            // 轮询检查喝水状态（每分钟检查一次）
+            async function checkWaterStatus() {
+                try {
+                    const waterState = await window.__TAURI__.invoke('get_water_reminder_state');
+                    const config = await window.__TAURI__.invoke('get_water_reminder_config');
+                    
+                    if (config.enabled) {
+                        // 检查当前时间段是否已喝水
+                        const getCurrentPeriodStart = () => {
+                            const now = Math.floor(Date.now() / 1000);
+                            if (config.custom_reminder_times.length > 0) {
+                                // 使用自定义时间，按小时计算
+                                const hourSeconds = 3600;
+                                return Math.floor(now / hourSeconds) * hourSeconds;
+                            } else {
+                                // 使用间隔时间，计算当前时间段的开始时间
+                                const intervalSeconds = config.reminder_interval_hours * 3600;
+                                return Math.floor(now / intervalSeconds) * intervalSeconds;
+                            }
+                        };
+                        
+                        const currentPeriodStart = getCurrentPeriodStart();
+                        const needsReminder = waterState.last_water_period_start !== currentPeriodStart && 
+                                            !waterState.current_period_water_drunk;
+                        
+                        if (needsReminder && canSpeak && !isWaterReminderMode) {
+                            showWaterReminder();
+                        }
                     }
-                    scheduleSpeech(); // 递归调度下一次
-                }, randomDelay);
+                } catch (error) {
+                    console.error('检查喝水状态失败:', error);
+                }
             }
 
-            // 开始说话调度
-            scheduleSpeech();
+            // 每分钟检查一次喝水状态
+            setInterval(checkWaterStatus, 60000);
 
-            // 也可以通过双击让狗子立即说话
+            // 双击仍然可以触发喝水提醒
             petContainer.addEventListener('dblclick', (e) => {
                 e.preventDefault();
                 if (canSpeak) {
-                    showSpeech();
+                    showWaterReminder();
                 }
             });
 
@@ -461,8 +498,6 @@
                 console.error('打开开发者工具失败:', error);
             }
         }
-
-
 
         async function quitApp() {
             try {

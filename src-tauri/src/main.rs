@@ -10,10 +10,12 @@
 use tauri::{Manager, State, WindowEvent};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
-use enigo::{Enigo, Mouse, Settings};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use enigo::{Enigo, Mouse, Settings, Key, Keyboard};
+use serde::{Deserialize, Serialize};
+use chrono;
 
-#[derive(Default)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 struct StepCounter {
     total_distance: f64,
     steps: u32,
@@ -24,7 +26,190 @@ struct StepCounter {
     is_minimized: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WaterReminderConfig {
+    daily_glasses: u32,
+    reminder_interval_hours: u32,
+    custom_reminder_times: Vec<String>, // HH:MM format
+    enabled: bool,
+}
+
+impl Default for WaterReminderConfig {
+    fn default() -> Self {
+        Self {
+            daily_glasses: 8,
+            reminder_interval_hours: 1,
+            custom_reminder_times: vec![],
+            enabled: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WaterReminderState {
+    config: WaterReminderConfig,
+    last_reminder_time: u64,
+    glasses_drunk_today: u32,
+    last_reset_date: String,
+    current_period_water_drunk: bool,  // 当前时间段是否已喝水
+    last_water_period_start: u64,     // 上次喝水的时间段开始时间
+    last_custom_reminder_triggered_at: Option<String>, // 跟踪上一个触发的自定义时间点 (HH:MM)
+}
+
+impl Default for WaterReminderState {
+    fn default() -> Self {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        // 计算当前时间段的开始时间
+        let current_period_start = if true { // 暂时用true，后面会重新计算
+            // 默认按1小时计算，后面会根据实际配置调整
+            let hour_seconds = 3600;
+            (now / hour_seconds) * hour_seconds
+        } else {
+            0
+        };
+        
+        Self {
+            config: WaterReminderConfig::default(),
+            last_reminder_time: now, // 设置为当前时间，避免立即提醒
+            glasses_drunk_today: 0,
+            last_reset_date: Self::get_current_date(),
+            current_period_water_drunk: true, // 第一次启动时认为已喝水
+            last_water_period_start: current_period_start,
+            last_custom_reminder_triggered_at: None,
+        }
+    }
+}
+
+impl WaterReminderState {
+    fn get_current_date() -> String {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let date = chrono::DateTime::from_timestamp(now as i64, 0)
+            .unwrap()
+            .format("%Y-%m-%d")
+            .to_string();
+        date
+    }
+    
+    fn get_current_period_start(&self) -> u64 {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        if self.config.custom_reminder_times.is_empty() {
+            // 使用间隔时间，计算当前时间段的开始时间
+            let interval_seconds = self.config.reminder_interval_hours as u64 * 3600;
+            (now / interval_seconds) * interval_seconds
+        } else {
+            // 使用自定义时间，按小时计算
+            let hour_seconds = 3600;
+            (now / hour_seconds) * hour_seconds
+        }
+    }
+    
+    fn should_reset_daily_count(&mut self) {
+        let current_date = Self::get_current_date();
+        if self.last_reset_date != current_date {
+            self.glasses_drunk_today = 0;
+            self.last_reset_date = current_date;
+            self.current_period_water_drunk = false;
+            self.last_water_period_start = 0;
+            println!("🔄 新的一天开始，重置喝水计数");
+        }
+    }
+    
+    fn check_period_change(&mut self) {
+        if !self.config.custom_reminder_times.is_empty() {
+            // --- 自定义时间模式 ---
+            let current_time_str = chrono::Local::now().format("%H:%M").to_string();
+            // 只有当这个时间点尚未被触发过时，才进行处理
+            if self.config.custom_reminder_times.contains(&current_time_str) && self.last_custom_reminder_triggered_at.as_deref() != Some(current_time_str.as_str()) {
+                // 到达了提醒时间点，如果当前状态是"已喝水"，则切换为"未喝水"以触发提醒
+                println!("⏰ [Custom Time] Matched: {}. Setting flag to NEEDS DRINKING.", current_time_str);
+                self.current_period_water_drunk = false;
+                // "锁定"这个时间点，防止在同一分钟内重复触发
+                self.last_custom_reminder_triggered_at = Some(current_time_str);
+            }
+        } else {
+            // --- 按小时间隔模式 ---
+            let current_period_start = self.get_current_period_start();
+            if current_period_start > self.last_water_period_start {
+                // 进入了新的时间段
+                println!("🌅 [PERIOD CHANGE] New period started. Old start: {}, New start: {}. Resetting water drunk status.", self.last_water_period_start, current_period_start);
+                self.current_period_water_drunk = false; // 重置喝水状态
+                self.last_water_period_start = current_period_start;
+                // 在小时模式下，清除自定义时间的锁定
+                self.last_custom_reminder_triggered_at = None;
+            }
+        }
+    }
+    
+    fn record_water_drunk(&mut self) {
+        println!("💧 [WATER DRUNK] User recorded drinking water. State before: {:?}", self);
+        self.should_reset_daily_count();
+        self.glasses_drunk_today += 1;
+        self.current_period_water_drunk = true;
+        self.last_water_period_start = self.get_current_period_start(); // 将喝水时间标记为当前时间段
+        println!("💧 [WATER DRUNK] State after: {:?}", self);
+    }
+    
+    fn needs_reminder(&mut self) -> bool {
+        self.should_reset_daily_count();
+        self.check_period_change();
+        
+        if !self.config.enabled {
+            return false;
+        }
+        
+        // 如果当前时间段已经喝过水，不需要提醒
+        if self.current_period_water_drunk {
+            return false;
+        }
+
+        // 防刷屏：如果60秒内已经提醒过，则不再提醒
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        if now < self.last_reminder_time.saturating_add(60) {
+            // 在UI上可能仍然显示需要喝水，但是不再发送新的提醒事件
+            return false; 
+        }
+        
+        // 如果通过了以上所有检查，说明需要发送提醒
+        true
+    }
+
+    fn update_config(&mut self, new_config: WaterReminderConfig) {
+        self.config = new_config;
+
+        // --- NEW ROBUST LOGIC ---
+        // Whenever the config is changed, we must reset the reminder state.
+        // This prevents a reminder for an old setting (e.g., from hourly mode)
+        // from firing immediately after switching to a new setting (e.g., custom time mode).
+        // We reset to a "safe" state, assuming the user has drunk water for the current period.
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        println!("🔄 [CONFIG UPDATE] Config changed. Resetting reminder state to be safe...");
+        self.current_period_water_drunk = true;
+        self.last_water_period_start = self.get_current_period_start();
+        self.last_reminder_time = now; // Also update this to be safe
+        self.last_custom_reminder_triggered_at = None; // 关键：重置配置时必须清除锁定
+    }
+}
+
 type CounterState = Arc<Mutex<StepCounter>>;
+type WaterReminderStateType = Arc<Mutex<WaterReminderState>>;
 
 #[tauri::command]
 fn reset_counter(counter: State<CounterState>) -> Result<(), String> {
@@ -303,18 +488,217 @@ fn show_context_menu(app_handle: tauri::AppHandle, x: i32, y: i32) -> Result<(),
 fn hide_context_menu(app_handle: tauri::AppHandle) -> Result<(), String> {
     if let Some(menu_window) = app_handle.get_window("context_menu") {
         let _ = menu_window.close();
-        println!("🚫 右键菜单窗口已关闭");
+        println!("🗑️ 右键菜单窗口已关闭");
     }
     Ok(())
 }
 
+// 喝水提醒相关命令
+#[tauri::command]
+fn get_water_reminder_config(water_state: State<WaterReminderStateType>) -> Result<WaterReminderConfig, String> {
+    match water_state.lock() {
+        Ok(state) => Ok(state.config.clone()),
+        Err(_) => Err("无法获取喝水提醒配置".to_string())
+    }
+}
+
+#[tauri::command]
+fn update_water_reminder_config(
+    water_state: State<WaterReminderStateType>,
+    config: WaterReminderConfig
+) -> Result<(), String> {
+    println!("💧 [CONFIG UPDATE] Received new config: {:?}", config);
+    match water_state.lock() {
+        Ok(mut state) => {
+            state.update_config(config);
+            println!("💧 [CONFIG UPDATE] State updated. New state: {:?}", state);
+            Ok(())
+        },
+        Err(_) => Err("无法更新喝水提醒配置".to_string())
+    }
+}
+
+#[tauri::command]
+fn get_water_reminder_state(water_state: State<WaterReminderStateType>) -> Result<WaterReminderState, String> {
+    match water_state.lock() {
+        Ok(mut state) => {
+            state.should_reset_daily_count();
+            Ok(state.clone())
+        },
+        Err(_) => Err("无法获取喝水提醒状态".to_string())
+    }
+}
+
+#[tauri::command]
+fn record_water_drunk(water_state: State<WaterReminderStateType>) -> Result<(), String> {
+    match water_state.lock() {
+        Ok(mut state) => {
+            state.record_water_drunk();
+            Ok(())
+        },
+        Err(_) => Err("无法记录喝水".to_string())
+    }
+}
+
+#[tauri::command]
+fn show_water_reminder(app_handle: tauri::AppHandle, message: String) -> Result<(), String> {
+    println!("💧 显示喝水提醒: {}", message);
+    
+    let reminder_html = format!(r#"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {{
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            color: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            user-select: none;
+        }}
+        .reminder-container {{
+            text-align: center;
+            max-width: 300px;
+        }}
+        .water-icon {{
+            font-size: 48px;
+            margin-bottom: 16px;
+        }}
+        .message {{
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            line-height: 1.4;
+        }}
+        .buttons {{
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }}
+        .btn {{
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        .btn-primary {{
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }}
+        .btn-primary:hover {{
+            background: rgba(255, 255, 255, 0.3);
+        }}
+        .btn-secondary {{
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }}
+        .btn-secondary:hover {{
+            background: rgba(255, 255, 255, 0.2);
+        }}
+    </style>
+</head>
+<body>
+    <div class="reminder-container">
+        <div class="water-icon">💧</div>
+        <div class="message">{}</div>
+        <div class="buttons">
+            <button class="btn btn-primary" onclick="drinkWater()">我喝了水</button>
+            <button class="btn btn-secondary" onclick="closeReminder()">稍后提醒</button>
+        </div>
+    </div>
+    
+    <script>
+        async function drinkWater() {{
+            try {{
+                await window.__TAURI__.invoke('record_water_drunk');
+                window.__TAURI__.window.getCurrent().close();
+            }} catch (error) {{
+                console.error('记录喝水失败:', error);
+            }}
+        }}
+        
+        async function closeReminder() {{
+            window.__TAURI__.window.getCurrent().close();
+        }}
+        
+        // 5秒后自动关闭
+        setTimeout(() => {{
+            window.__TAURI__.window.getCurrent().close();
+        }}, 5000);
+        
+        // ESC键关闭
+        document.addEventListener('keydown', (e) => {{
+            if (e.key === 'Escape') {{
+                window.__TAURI__.window.getCurrent().close();
+            }}
+        }});
+    </script>
+</body>
+</html>
+    "#, message);
+    
+    use tauri::WindowBuilder;
+    
+    match WindowBuilder::new(
+        &app_handle,
+        "water_reminder",
+        tauri::WindowUrl::App("".into())
+    )
+    .title("喝水提醒")
+    .inner_size(340.0, 200.0)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .focused(true)
+    .transparent(true)
+    .center()
+    .build() {
+        Ok(window) => {
+            let escaped_html = reminder_html
+                .replace('\\', "\\\\")
+                .replace('`', "\\`")
+                .replace('\n', "\\n")
+                .replace('\r', "");
+                
+            let script = format!("document.documentElement.innerHTML = `{}`;", escaped_html);
+            
+            match window.eval(&script) {
+                Ok(_) => {
+                    println!("✅ 喝水提醒窗口创建成功");
+                },
+                Err(e) => {
+                    println!("⚠️ 设置提醒HTML内容失败: {:?}", e);
+                }
+            }
+            
+            Ok(())
+        },
+        Err(e) => {
+            println!("❌ 创建喝水提醒窗口失败: {:?}", e);
+            Err(format!("创建提醒窗口失败: {:?}", e))
+        }
+    }
+}
+
 fn main() {
     let counter = Arc::new(Mutex::new(StepCounter::default()));
+    let water_reminder_state = Arc::new(Mutex::new(WaterReminderState::default()));
     
     tauri::Builder::default()
         .manage(counter.clone())
-        .invoke_handler(tauri::generate_handler![reset_counter, get_current_steps, switch_to_main_window, switch_to_pet_window, quit_app, open_devtools, show_context_menu, hide_context_menu])
-        .setup(|app| {
+        .manage(water_reminder_state.clone())
+        .invoke_handler(tauri::generate_handler![reset_counter, get_current_steps, switch_to_main_window, switch_to_pet_window, quit_app, open_devtools, show_context_menu, hide_context_menu, get_water_reminder_config, update_water_reminder_config, get_water_reminder_state, record_water_drunk, show_water_reminder])
+        .setup(move |app| {
             let app_handle = app.handle();
             let window = app.get_window("main").unwrap();
 
@@ -324,7 +708,7 @@ fn main() {
             window.on_window_event(move |event| {
                 match event {
                     WindowEvent::Focused(focused) => {
-                        if let Ok(mut c) = counter_for_window.lock() {
+                        if let Ok(c) = counter_for_window.lock() {
                             println!("🪟 窗口焦点状态: {}", if *focused { "获得焦点" } else { "失去焦点" });
                         }
                     },
@@ -346,10 +730,11 @@ fn main() {
             });
 
             let counter_clone = counter.clone();
+            let app_handle_for_steps = app_handle.clone();
             thread::spawn(move || {
                 println!("🖱️ 开始监听鼠标移动...");
                 match Enigo::new(&Settings::default()) {
-                    Ok(mut enigo) => {
+                    Ok(enigo) => {
                         loop {
                             match enigo.location() {
                                 Ok((x, y)) => {
@@ -409,14 +794,48 @@ fn main() {
             });
 
             // 每秒发送一次当前步数给前端
+            let app_handle_for_emit = app_handle.clone();
             thread::spawn(move || {
                 loop {
                     let steps = {
                         let c = counter.lock().unwrap();
                         c.steps
                     };
-                    let _ = app_handle.emit_all("step_update", steps);
+                    let _ = app_handle_for_emit.emit_all("step_update", steps);
                     thread::sleep(Duration::from_secs(1));
+                }
+            });
+
+            // 喝水提醒检查线程
+            let water_state_clone = water_reminder_state.clone();
+            let app_handle_for_water = app_handle.clone();
+            thread::spawn(move || {
+                println!("💧 开始喝水提醒检查...");
+                
+                // 等待一段时间再开始检查，避免应用刚启动就立即提醒
+                thread::sleep(Duration::from_secs(10));
+                
+                loop {
+                    // 每30秒检查一次，提高精确度
+                    thread::sleep(Duration::from_secs(30));
+                    
+                    if let Ok(mut state) = water_state_clone.lock() {
+                        println!("🔍 [CHECK] Running reminder check. Current state: {:?}", state);
+                        if state.needs_reminder() {
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs();
+                            state.last_reminder_time = now;
+                            
+                            // 发送事件给宠物狗提醒
+                            if let Err(e) = app_handle_for_water.emit_all("water_reminder", "time_to_drink") {
+                                println!("❌ 发送喝水提醒事件失败: {}", e);
+                            }
+                            
+                            println!("💧 发送喝水提醒事件给宠物狗");
+                        }
+                    }
                 }
             });
 
