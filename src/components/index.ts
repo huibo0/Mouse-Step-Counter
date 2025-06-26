@@ -1,7 +1,8 @@
-export { HeaderBar } from './HeaderBar';
-export { StepCounterDisplay } from './StepCounterDisplay';
-export { StatsCards } from './StatsCards';
-export { WaterReminderCard } from './WaterReminderCard';
-export { StatusChip } from './StatusChip';
 export { ActionButtons } from './ActionButtons';
-export { WaterReminderConfigDialog } from './WaterReminderConfigDialog'; 
+export { HeaderBar } from './HeaderBar';
+export { StatsCards } from './StatsCards';
+export { StatusChip } from './StatusChip';
+export { StepCounterDisplay } from './StepCounterDisplay';
+export { WaterReminderCard } from './WaterReminderCard';
+export { WaterReminderConfigDialog } from './WaterReminderConfigDialog';
+export { StatsDisplay } from './StatsDisplay'; 

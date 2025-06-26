@@ -19,6 +19,8 @@ tauri = { version = "1.6.1", features = [ "fs-write-file", "dialog-all", "fs-rea
 enigo = "0.3.0"
 fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }
 chrono = { version = "0.4.38", features = ["serde", "now"] }
+rusqlite = { version = "0.30.0", features = ["bundled", "chrono"] }
+uuid = { version = "1.7.0", features = ["v4", "serde"] }
 
 [features]
 default = [ "custom-protocol" ]

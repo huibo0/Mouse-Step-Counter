@@ -7,13 +7,20 @@
 
 // Rust 后端 (src-tauri/src/main.rs)
 
+mod database;
+
 use tauri::{Manager, State, WindowEvent};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use enigo::{Enigo, Mouse, Settings, Key, Keyboard};
+use std::path::PathBuf;
+use enigo::{Enigo, Mouse, Settings};
 use serde::{Deserialize, Serialize};
 use chrono;
+use database::{Database, DailyStats, WeeklyStats, MonthlyStats, Achievement, FunStats, AchievementEvent, EventType, WorkSession};
+use uuid::Uuid;
+use chrono::{Utc};
+use serde_json;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 struct StepCounter {
@@ -24,6 +31,11 @@ struct StepCounter {
     initialized: bool,
     permission_error: bool,
     is_minimized: bool,
+    current_work_session_id: Option<String>, // 当前工作会话ID
+    last_mouse_movement: Option<SystemTime>, // 最后一次鼠标移动时间
+    session_start_steps: u32,
+    session_start_distance: f64,
+    session_start_movement_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,6 +222,108 @@ impl WaterReminderState {
 
 type CounterState = Arc<Mutex<StepCounter>>;
 type WaterReminderStateType = Arc<Mutex<WaterReminderState>>;
+type DatabaseState = Arc<Mutex<Database>>;
+
+// 数据库相关命令
+#[tauri::command]
+fn get_daily_stats(db: State<DatabaseState>, days: i32) -> Result<Vec<DailyStats>, String> {
+    match db.lock() {
+        Ok(database) => {
+            database.get_daily_stats(days)
+                .map_err(|e| format!("获取每日统计失败: {}", e))
+        },
+        Err(_) => Err("无法访问数据库".to_string())
+    }
+}
+
+#[tauri::command]
+fn get_weekly_stats(db: State<DatabaseState>, weeks: i32) -> Result<Vec<WeeklyStats>, String> {
+    match db.lock() {
+        Ok(database) => {
+            database.get_weekly_stats(weeks)
+                .map_err(|e| format!("获取每周统计失败: {}", e))
+        },
+        Err(_) => Err("无法访问数据库".to_string())
+    }
+}
+
+#[tauri::command]
+fn get_monthly_stats(db: State<DatabaseState>, months: i32) -> Result<Vec<MonthlyStats>, String> {
+    match db.lock() {
+        Ok(database) => {
+            database.get_monthly_stats(months)
+                .map_err(|e| format!("获取每月统计失败: {}", e))
+        },
+        Err(_) => Err("无法访问数据库".to_string())
+    }
+}
+
+#[tauri::command]
+fn get_today_stats(db: State<DatabaseState>) -> Result<Option<DailyStats>, String> {
+    match db.lock() {
+        Ok(database) => {
+            database.get_today_stats()
+                .map_err(|e| format!("获取今日统计失败: {}", e))
+        },
+        Err(_) => Err("无法访问数据库".to_string())
+    }
+}
+
+#[tauri::command]
+fn get_total_stats(db: State<DatabaseState>) -> Result<(u32, f64, u32), String> {
+    match db.lock() {
+        Ok(database) => {
+            database.get_total_stats()
+                .map_err(|e| format!("获取总统计失败: {}", e))
+        },
+        Err(_) => Err("无法访问数据库".to_string())
+    }
+}
+
+// 辅助函数：结束当前牛马计时器
+fn end_current_work_session(c: &mut StepCounter, db: &Database) {
+    if let Some(session_id) = &c.current_work_session_id {
+        let session_steps = c.steps.saturating_sub(c.session_start_steps);
+        let session_distance = c.total_distance - c.session_start_distance;
+        let session_movement_count = c.session_start_movement_count;
+        if let Err(e) = db.end_work_session(session_id, session_steps, session_distance, session_movement_count) {
+            println!("❌ 结束牛马计时器失败: {}", e);
+        } else {
+            println!("✅ 结束牛马计时器: {} 步数:{} 距离:{} 次数:{}", session_id, session_steps, session_distance, session_movement_count);
+        }
+        c.current_work_session_id = None;
+    }
+}
+
+#[tauri::command]
+fn clear_all_stats(db: State<DatabaseState>, counter: State<CounterState>) -> Result<(), String> {
+    match (db.lock(), counter.lock()) {
+        (Ok(database), Ok(mut c)) => {
+            end_current_work_session(&mut c, &database);
+            database.clear_all_stats().map_err(|e| format!("清空统计数据失败: {}", e))?;
+            // 清空后自动开启一个新的工作会话
+            match database.start_work_session() {
+                Ok(session_id) => {
+                    c.current_work_session_id = Some(session_id.clone());
+                    c.last_mouse_movement = Some(std::time::SystemTime::now());
+                    println!("🚀 清空后自动开启新工作会话: {}", session_id);
+                },
+                Err(e) => println!("❌ 清空后自动开启工作会话失败: {}", e)
+            }
+            // 其余状态重置逻辑保持不变
+            c.total_distance = 0.0;
+            c.steps = 0;
+            c.last_x = 0;
+            c.last_y = 0;
+            c.initialized = false;
+            c.session_start_steps = 0;
+            c.session_start_distance = 0.0;
+            c.session_start_movement_count = 0;
+            Ok(())
+        },
+        _ => Err("无法访问数据库或计数器".to_string())
+    }
+}
 
 #[tauri::command]
 fn reset_counter(counter: State<CounterState>) -> Result<(), String> {
@@ -219,6 +333,9 @@ fn reset_counter(counter: State<CounterState>) -> Result<(), String> {
             c.steps = 0;
             c.initialized = false;
             println!("🔄 计数器已重置");
+            c.session_start_steps = 0;
+            c.session_start_distance = 0.0;
+            c.session_start_movement_count = 0;
             Ok(())
         },
         Err(_) => Err("无法重置计数器".to_string())
@@ -690,17 +807,102 @@ fn show_water_reminder(app_handle: tauri::AppHandle, message: String) -> Result<
     }
 }
 
+#[tauri::command]
+fn get_fun_stats(db: State<DatabaseState>) -> Result<FunStats, String> {
+    match db.lock() {
+        Ok(database) => {
+            database.get_fun_stats()
+                .map_err(|e| format!("获取趣味统计失败: {}", e))
+        },
+        Err(_) => Err("无法访问数据库".to_string())
+    }
+}
+
+#[tauri::command]
+fn get_achievements(db: State<DatabaseState>) -> Result<Vec<Achievement>, String> {
+    match db.lock() {
+        Ok(database) => {
+            database.get_achievements()
+                .map_err(|e| format!("获取成就失败: {}", e))
+        },
+        Err(_) => Err("无法访问数据库".to_string())
+    }
+}
+
+#[tauri::command]
+fn cleanup_old_movements(db: State<DatabaseState>) -> Result<(), String> {
+    match db.lock() {
+        Ok(database) => {
+            database.cleanup_old_movements()
+                .map_err(|e| format!("清理旧数据失败: {}", e))
+        },
+        Err(_) => Err("无法访问数据库".to_string())
+    }
+}
+
+#[tauri::command]
+fn get_work_sessions(db: State<DatabaseState>, limit: Option<usize>) -> Result<Vec<WorkSession>, String> {
+    let limit = limit.unwrap_or(3);
+    match db.lock() {
+        Ok(database) => {
+            database.get_work_sessions(limit)
+                .map_err(|e| format!("获取牛马计时器失败: {}", e))
+        },
+        Err(_) => Err("无法访问数据库".to_string())
+    }
+}
+
+#[tauri::command]
+fn get_current_session_stats(counter: State<CounterState>) -> Option<(u32, f64, u32)> {
+    let c = counter.lock().ok()?;
+    if c.current_work_session_id.is_some() {
+        Some((
+            c.steps.saturating_sub(c.session_start_steps),
+            c.total_distance - c.session_start_distance,
+            c.session_start_movement_count,
+        ))
+    } else {
+        None
+    }
+}
+
 fn main() {
     let counter = Arc::new(Mutex::new(StepCounter::default()));
     let water_reminder_state = Arc::new(Mutex::new(WaterReminderState::default()));
     
+    // 初始化数据库
+    let db_path = std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("mouse_steps.db");
+    
+    let database = match Database::new(&db_path) {
+        Ok(db) => {
+            println!("✅ 数据库初始化成功: {:?}", db_path);
+            Arc::new(Mutex::new(db))
+        },
+        Err(e) => {
+            println!("❌ 数据库初始化失败: {}", e);
+            panic!("无法初始化数据库");
+        }
+    };
+    
     tauri::Builder::default()
         .manage(counter.clone())
         .manage(water_reminder_state.clone())
-        .invoke_handler(tauri::generate_handler![reset_counter, get_current_steps, switch_to_main_window, switch_to_pet_window, quit_app, open_devtools, show_context_menu, hide_context_menu, get_water_reminder_config, update_water_reminder_config, get_water_reminder_state, record_water_drunk, show_water_reminder])
+        .manage(database.clone())
+        .invoke_handler(tauri::generate_handler![reset_counter, get_current_steps, switch_to_main_window, switch_to_pet_window, quit_app, open_devtools, show_context_menu, hide_context_menu, get_water_reminder_config, update_water_reminder_config, get_water_reminder_state, record_water_drunk, show_water_reminder, get_daily_stats, get_weekly_stats, get_monthly_stats, get_today_stats, get_total_stats, clear_all_stats, get_fun_stats, get_achievements, cleanup_old_movements, get_work_sessions, get_current_session_stats])
         .setup(move |app| {
             let app_handle = app.handle();
             let window = app.get_window("main").unwrap();
+
+            // 注册应用退出时的清理函数
+            let counter_for_cleanup = counter.clone();
+            let database_for_cleanup = database.clone();
+            app_handle.listen_global("tauri://close-requested", move |_| {
+                if let (Ok(db), Ok(mut c)) = (database_for_cleanup.lock(), counter_for_cleanup.lock()) {
+                    end_current_work_session(&mut c, &db);
+                }
+            });
 
             // 监听窗口事件
             let counter_for_window = counter.clone();
@@ -708,7 +910,7 @@ fn main() {
             window.on_window_event(move |event| {
                 match event {
                     WindowEvent::Focused(focused) => {
-                        if let Ok(c) = counter_for_window.lock() {
+                        if let Ok(_c) = counter_for_window.lock() {
                             println!("🪟 窗口焦点状态: {}", if *focused { "获得焦点" } else { "失去焦点" });
                         }
                     },
@@ -730,7 +932,7 @@ fn main() {
             });
 
             let counter_clone = counter.clone();
-            let app_handle_for_steps = app_handle.clone();
+            let database_clone = database.clone();
             thread::spawn(move || {
                 println!("🖱️ 开始监听鼠标移动...");
                 match Enigo::new(&Settings::default()) {
@@ -748,6 +950,7 @@ fn main() {
                                         c.last_x = x;
                                         c.last_y = y;
                                         c.initialized = true;
+                                        c.last_mouse_movement = Some(SystemTime::now());
                                         println!("🎯 鼠标监听已初始化");
                                     } else {
                                         let dx = (x - c.last_x) as f64;
@@ -755,15 +958,63 @@ fn main() {
                                         let distance = (dx.powi(2) + dy.powi(2)).sqrt();
                                         
                                         if distance > 0.0 {
+                                            // 更新最后鼠标移动时间
+                                            c.last_mouse_movement = Some(SystemTime::now());
+                                            
+                                            // 检查是否需要开始新的工作会话
+                                            if c.current_work_session_id.is_none() {
+                                                if let Ok(db) = database_clone.lock() {
+                                                    match db.start_work_session() {
+                                                        Ok(session_id) => {
+                                                            c.current_work_session_id = Some(session_id.clone());
+                                                            c.session_start_steps = c.steps;
+                                                            c.session_start_distance = c.total_distance;
+                                                            c.session_start_movement_count = 0;
+                                                            println!("🚀 检测到鼠标移动，自动开始牛马计时器: {}", session_id);
+                                                        },
+                                                        Err(e) => println!("❌ 自动开始牛马计时器失败: {}", e)
+                                                    }
+                                                }
+                                            }
+                                            
                                             c.total_distance += distance;
                                             let new_steps = (c.total_distance / 100.0) as u32;
                                             if new_steps != c.steps {
+                                                let steps_increment = new_steps - c.steps;
                                                 c.steps = new_steps;
+                                                
+                                                // 记录到数据库
+                                                if let Ok(db) = database_clone.lock() {
+                                                    if let Err(e) = db.record_movement(x, y, distance, steps_increment) {
+                                                        println!("⚠️ 记录运动数据失败: {}", e);
+                                                    }
+                                                    
+                                                    // 检查单次移动距离成就
+                                                    if distance >= 100.0 {
+                                                        let event = AchievementEvent {
+                                                            id: Uuid::new_v4().to_string(),
+                                                            event_type: EventType::LongestSingleMove,
+                                                            value: distance,
+                                                            description: format!("单次移动距离: {:.1}像素", distance),
+                                                            timestamp: Utc::now(),
+                                                            metadata: serde_json::to_string(&serde_json::json!({
+                                                                "x": x,
+                                                                "y": y,
+                                                                "distance": distance,
+                                                            })).unwrap(),
+                                                        };
+                                                        if let Err(e) = db.record_achievement_event(event) {
+                                                            println!("⚠️ 记录成就事件失败: {}", e);
+                                                        }
+                                                    }
+                                                }
+                                                
                                                 // 即使窗口最小化也打印日志
                                                 if new_steps % 10 == 0 {
                                                     println!("📈 步数更新: {} (距离: {:.1}px)", c.steps, c.total_distance);
                                                 }
                                             }
+                                            c.session_start_movement_count += 1;
                                             c.last_x = x;
                                             c.last_y = y;
                                         }
@@ -795,14 +1046,37 @@ fn main() {
 
             // 每秒发送一次当前步数给前端
             let app_handle_for_emit = app_handle.clone();
+            let counter_for_emit = counter.clone();
             thread::spawn(move || {
                 loop {
                     let steps = {
-                        let c = counter.lock().unwrap();
+                        let c = counter_for_emit.lock().unwrap();
                         c.steps
                     };
                     let _ = app_handle_for_emit.emit_all("step_update", steps);
                     thread::sleep(Duration::from_secs(1));
+                }
+            });
+
+            // 工作会话超时检查线程（每30秒检查一次）
+            let counter_for_timeout = counter.clone();
+            let database_for_timeout = database.clone();
+            thread::spawn(move || {
+                println!("⏰ 开始工作会话超时检查...");
+                loop {
+                    thread::sleep(Duration::from_secs(30)); // 每30秒检查一次
+                    
+                    if let (Ok(mut c), Ok(db)) = (counter_for_timeout.lock(), database_for_timeout.lock()) {
+                        if let (Some(session_id), Some(last_movement)) = (&c.current_work_session_id, c.last_mouse_movement) {
+                            let now = SystemTime::now();
+                            let inactive_duration = now.duration_since(last_movement).unwrap();
+                            
+                            // 如果超过15分钟没有鼠标移动，结束工作会话
+                            if inactive_duration.as_secs() > 15 * 60 {
+                                end_current_work_session(&mut c, &db);
+                            }
+                        }
+                    }
                 }
             });
 
@@ -834,6 +1108,45 @@ fn main() {
                             }
                             
                             println!("💧 发送喝水提醒事件给宠物狗");
+                        }
+                    }
+                }
+            });
+
+            // 定时清理旧数据线程（每周清理一次）
+            let database_clone_for_cleanup = database.clone();
+            thread::spawn(move || {
+                println!("🧹 启动数据清理任务...");
+                
+                // 等待应用启动完成
+                thread::sleep(Duration::from_secs(60));
+                
+                loop {
+                    // 每周清理一次旧数据
+                    thread::sleep(Duration::from_secs(7 * 24 * 3600)); // 7天
+                    
+                    if let Ok(db) = database_clone_for_cleanup.lock() {
+                        if let Err(e) = db.cleanup_old_movements() {
+                            println!("⚠️ 清理旧数据失败: {}", e);
+                        } else {
+                            println!("✅ 定期清理旧数据完成");
+                        }
+                    }
+                }
+            });
+
+            // 在main的setup中新增定时线程，每15秒写入当前会话进度
+            let counter_for_update = counter.clone();
+            let database_for_update = database.clone();
+            thread::spawn(move || {
+                loop {
+                    thread::sleep(Duration::from_secs(15));
+                    if let (Ok(c), Ok(db)) = (counter_for_update.lock(), database_for_update.lock()) {
+                        if let Some(session_id) = &c.current_work_session_id {
+                            let session_steps = c.steps.saturating_sub(c.session_start_steps);
+                            let session_distance = c.total_distance - c.session_start_distance;
+                            let session_movement_count = c.session_start_movement_count;
+                            let _ = db.update_work_session_progress(session_id, session_steps, session_distance, session_movement_count);
                         }
                     }
                 }

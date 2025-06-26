@@ -6,6 +6,8 @@ import {
   Card,
   CardContent,
   Fade,
+  Tabs,
+  Tab,
 } from '@mui/material';
 
 import { HeaderBar } from './components/HeaderBar';
@@ -15,12 +17,14 @@ import { WaterReminderCard } from './components/WaterReminderCard';
 import { StatusChip } from './components/StatusChip';
 import { ActionButtons } from './components/ActionButtons';
 import { WaterReminderConfigDialog } from './components/WaterReminderConfigDialog';
+import { StatsDisplay } from './components/StatsDisplay';
 import { WaterReminderConfig, WaterReminderState } from './types/water';
 
 function App() {
   const [steps, setSteps] = useState(0);
   const [lastSteps, setLastSteps] = useState(0);
   const [isIncreasing, setIsIncreasing] = useState(false);
+  const [activeTab, setActiveTab] = useState(0);
   const [waterConfig, setWaterConfig] = useState<WaterReminderConfig>({
     daily_glasses: 8,
     reminder_interval_hours: 1,
@@ -94,6 +98,19 @@ function App() {
     };
   }, [refreshWaterState]);
 
+  // 监听统计数据重置事件
+  useEffect(() => {
+    const unlisten = listen('stats_reset', () => {
+      console.log('🔄 [APP] Received stats_reset event!');
+      setSteps(0);
+      setLastSteps(0);
+    });
+
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
+
   const handleReset = async () => {
     try {
       await invoke('reset_counter');
@@ -152,6 +169,40 @@ function App() {
 
   const distance = (steps * 0.1).toFixed(1); // 假设每步0.1米
 
+  const renderMainContent = () => (
+    <>
+      <StepCounterDisplay 
+        steps={steps} 
+        isIncreasing={isIncreasing} 
+      />
+
+      <StatsCards 
+        distance={distance}
+        steps={steps}
+        lastSteps={lastSteps}
+      />
+
+      <WaterReminderCard 
+        waterState={waterState}
+        waterConfig={waterConfig}
+        onWaterDrunk={refreshWaterState}
+      />
+
+      <StatusChip steps={steps} />
+
+      <ActionButtons
+        onReset={handleReset}
+        onShowPet={handleShowPetWindow}
+        onOpenWaterConfig={handleOpenWaterConfig}
+        onOpenDevTools={handleOpenDevTools}
+      />
+    </>
+  );
+
+  const renderStatsContent = () => (
+    <StatsDisplay />
+  );
+
   return (
     <Box
       sx={{
@@ -169,7 +220,7 @@ function App() {
         <Card
           elevation={24}
           sx={{
-            maxWidth: 400,
+            maxWidth: activeTab === 1 ? 800 : 400,
             width: '100%',
             borderRadius: 4,
             background: 'rgba(255, 255, 255, 0.95)',
@@ -182,31 +233,17 @@ function App() {
           <CardContent sx={{ padding: 4 }}>
             <HeaderBar />
             
-            <StepCounterDisplay 
-              steps={steps} 
-              isIncreasing={isIncreasing} 
-            />
+            {/* 标签页 */}
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+              <Tabs value={activeTab} onChange={(_, newValue) => setActiveTab(newValue)}>
+                <Tab label="计步器" />
+                <Tab label="统计" />
+              </Tabs>
+            </Box>
 
-            <StatsCards 
-              distance={distance}
-              steps={steps}
-              lastSteps={lastSteps}
-            />
-
-            <WaterReminderCard 
-              waterState={waterState}
-              waterConfig={waterConfig}
-              onWaterDrunk={refreshWaterState}
-            />
-
-            <StatusChip steps={steps} />
-
-            <ActionButtons
-              onReset={handleReset}
-              onShowPet={handleShowPetWindow}
-              onOpenWaterConfig={handleOpenWaterConfig}
-              onOpenDevTools={handleOpenDevTools}
-            />
+            {/* 内容区域 */}
+            {activeTab === 0 && renderMainContent()}
+            {activeTab === 1 && renderStatsContent()}
           </CardContent>
         </Card>
       </Fade>
